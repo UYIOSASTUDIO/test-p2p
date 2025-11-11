@@ -5,7 +5,7 @@
     import { hashPassword, bufferToHex } from '$lib/cryptoUtils'; // <-- (Wir müssen hashPassword auch auslagern)
 
     // --- Konfiguration ---
-    const allowedDomains = ['hallo.de', 'moin.de', 'gmail.com'];
+    const allowedDomains = ['hallo.de', 'moin.de', 'gmail.com']; // version 2
     // ---------------------
 
     let emailInput = '';
