@@ -17,7 +17,7 @@ export async function POST({ request }) {
         // HINWEIS: Zum Testen MUSS 'to: [email]' deine
         // verifizierte E-Mail-Adresse von Resend sein.
         const data = await resend.emails.send({
-            from: 'P2P App <onboarding@resend.dev>', // Test-Absender von Resend
+            from: 'P2P App <noreply@tooloudtoignore.com>', // privater Absender
             to: [email], // Die E-Mail des Benutzers
             subject: 'Dein Passwort für die P2P App',
             html: `
