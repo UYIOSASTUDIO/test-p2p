@@ -1,3 +1,4 @@
+// src/+layout.svelte
 <script lang="ts">
     import { session } from '$lib/session';
     import { supabase } from '$lib/supabaseClient';
@@ -8,48 +9,60 @@
     let sessionLoaded = false;
 
     onMount(() => {
+        // Initialer Check, falls der Benutzer den Browser geschlossen hat
+        supabase.auth.getSession().then(({ data: { session: sessionData } }) => {
+            handleAuthChange(null, sessionData);
+        });
+
         const { data: authListener } = supabase.auth.onAuthStateChange(
             async (_event, sessionData) => {
-                if (sessionData) {
-                    // BENUTZER IST EINGELOGGT
-
-                    // 1. Versuche, das Profil zu laden
-                    const { data: profile } = await supabase
-                        .from('profiles')
-                        .select()
-                        .eq('id', sessionData.user.id)
-                        .single();
-
-                    // 2. Setze den globalen Store
-                    session.set({
-                        isLoggedIn: true,
-                        user: sessionData.user,
-                        profile: profile, // ist entweder 'null' oder das Profil
-                    });
-
-                    // 3. Routing-Logik
-                    if (profile) {
-                        // Profil existiert: Gehe zum Dashboard (außer wir sind schon da)
-                        if ($page.route.id !== '/dashboard') {
-                            goto('/dashboard');
-                        }
-                    } else {
-                        // NEUER Benutzer: Zwinge ihn zur Profilerstellung
-                        if ($page.route.id !== '/profile-setup') {
-                            goto('/profile-setup');
-                        }
-                    }
-                } else {
-                    // BENUTZER IST AUSGELOGGT
-                    session.set({ isLoggedIn: false, user: null, profile: null });
-                    // Schicke ihn zur Login-Seite
-                    if ($page.route.id !== '/') {
-                        goto('/');
-                    }
-                }
-                sessionLoaded = true;
+                handleAuthChange(_event, sessionData);
             }
         );
+
+        async function handleAuthChange(_event: any, sessionData: any) {
+            if (sessionData) {
+                // BENUTZER IST EINGELOGGT
+
+                // 1. Versuche, das Profil zu laden
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('*') // Selektiere alle Spalten
+                    .eq('id', sessionData.user.id)
+                    .single();
+
+                // 2. Setze den globalen Store
+                session.set({
+                    isLoggedIn: true,
+                    user: sessionData.user,
+                    profile: profile, // ist entweder 'null' oder das Profil
+                });
+
+                // 3. Routing-Logik
+                const currentPage = $page.url.pathname;
+
+                if (profile) {
+                    // Profil existiert: Gehe zum Dashboard (außer wir sind schon da)
+                    if (currentPage !== '/dashboard' && currentPage !== '/') {
+                        goto('/dashboard');
+                    }
+                } else {
+                    // PROFIL FEHLT: Zwinge ihn zur Profilerstellung
+                    if (currentPage !== '/profile-setup' && currentPage !== '/') {
+                        goto('/profile-setup');
+                    }
+                }
+            } else {
+                // BENUTZER IST AUSGELOGGT ODER FEHLGESCHLAGEN
+                session.set({ isLoggedIn: false, user: null, profile: null });
+                // Schicke ihn zur Login-Seite
+                const currentPage = $page.url.pathname;
+                if (currentPage !== '/' && currentPage !== '/profile-setup') {
+                    goto('/');
+                }
+            }
+            sessionLoaded = true;
+        }
 
         return () => {
             authListener.subscription.unsubscribe();

@@ -1,123 +1,127 @@
+// src/routes/profile-setup/+page.svelte
 <script lang="ts">
     import { session } from '$lib/session';
     import { supabase } from '$lib/supabaseClient';
     import { goto } from '$app/navigation';
 
+    // States aus dem Session Store
+    let user = $session.user;
+    let email = user?.email || '';
+
+    // Formular-Zustände
     let usernameInput = '';
     let displayNameInput = '';
+    let ageInput: number | null = null; // Als Zahl oder null speichern
     let locationInput = '';
-    let ageInput: number | null = null; // Bleibt null, wenn leer
-
-    let error = '';
     let isLoading = false;
+    let error = '';
 
-    const domainMap = {
-        'hof-university.de': 'Hof University',
-        'gmail.com': 'Unknown'
-    };
-
-    let placeOfStudy = 'Unknown';
-    const userEmail = $session.user?.email;
-
-    if (userEmail) {
-        const domain = userEmail.split('@')[1];
-        placeOfStudy = domainMap[domain.toLowerCase()] || 'Unknown';
+    // Funktion zur Ableitung des Studienortes
+    function determinePlaceOfStudy(email: string): string {
+        const domain = email.split('@')[1];
+        switch (domain) {
+            case 'hof-university.de':
+                return 'Hof University';
+            case 'moin.de': // Beispiel
+                return 'Hamburg University of Technology';
+            default:
+                return 'Unknown';
+        }
     }
 
-    async function handleCreateProfile() {
-        // --- ÄNDERUNG HIER ---
-        // 'ageInput' wurde aus der Pflichtfeld-Prüfung entfernt
-        if (!usernameInput || !displayNameInput) {
-            error = 'Bitte fülle alle Pflichtfelder aus (ID, Name).';
-            return;
-        }
+    const placeOfStudy = determinePlaceOfStudy(email);
 
-        // --- ÄNDERUNG HIER --- (Alters-Check ist jetzt optional)
-        if (ageInput !== null && ageInput < 18) {
-            error = 'Du musst mindestens 18 Jahre alt sein (oder das Feld leer lassen).';
-            return;
-        }
-        error = '';
+    async function handleProfileCreation() {
         isLoading = true;
+        error = '';
 
-        try {
-            const { error: insertError } = await supabase.from('profiles').insert({
-                username: usernameInput,
-                display_name: displayNameInput,
-                location: locationInput || null,
-                // --- ÄNDERUNG HIER ---
-                // Sendet 'ageInput' (was eine Zahl oder null sein kann)
-                age: ageInput,
-                place_of_study: placeOfStudy
-            });
-
-            if (insertError) {
-                if (insertError.code === '23505') {
-                    error = 'Diese Benutzer-ID (username) ist bereits vergeben. Bitte wähle eine andere.';
-                } else {
-                    throw insertError;
-                }
-            } else {
-                session.update(s => ({
-                    ...s,
-                    profile: {
-                        username: usernameInput,
-                        display_name: displayNameInput,
-                        location: locationInput || undefined,
-                        age: ageInput, // <-- Alter auf null setzen, falls nicht angegeben
-                        place_of_study: placeOfStudy
-                    }
-                }));
-                goto('/dashboard');
-            }
-        } catch (err) {
-            console.error(err);
-            error = 'Ein Fehler ist aufgetreten. Bitte versuche es erneut.';
+        // 1. Validierung
+        if (usernameInput.length < 3 || displayNameInput.length < 3 || ageInput === null || ageInput <= 16) {
+            error = 'Bitte fülle alle Pflichtfelder (außer Wohnort) korrekt aus. Alter muss > 16 sein.';
+            isLoading = false;
+            return;
         }
+
+        // 2. Daten vorbereiten
+        const newProfile = {
+            id: user?.id, // Supabase ID vom eingeloggten Benutzer
+            username: usernameInput.toLowerCase(), // Eindeutige ID (muss Kleinbuchstaben sein)
+            display_name: displayNameInput,
+            age: ageInput,
+            location: locationInput || null, // Speichere null, wenn leer
+            place_of_study: placeOfStudy,
+        };
+
+        // 3. In Supabase speichern
+        // Wir nutzen 'insert' (da es das erste Mal ist)
+        const { error: dbError } = await supabase
+            .from('profiles')
+            .insert([newProfile]);
+
         isLoading = false;
+
+        if (dbError) {
+            if (dbError.code === '23505') { // Code für Unique Constraint Violation
+                error = 'Benutzer-ID (@' + usernameInput + ') ist bereits vergeben. Bitte wähle eine andere.';
+            } else {
+                error = 'Fehler beim Speichern des Profils. Bitte versuche es erneut.';
+                console.error('DB Error:', dbError);
+            }
+            return;
+        }
+
+        // 4. Erfolg: Session aktualisieren und weiterleiten
+        // Wir müssen die Session nicht manuell aktualisieren, da das Layout
+        // den neuen Zustand beim nächsten Laden selbst erkennt.
+        await goto('/dashboard');
     }
 </script>
 
 <main>
-    <h1>Willkommen!</h1>
-    <p>Bitte vervollständige dein Profil, um fortzufahren.</p>
+    <h1>Dein P2P-Profil erstellen</h1>
+    <p>Dies sind deine öffentlichen Daten, die andere Benutzer sehen werden.</p>
 
-    <form on:submit|preventDefault class="profile-form">
-        <label for="email">E-Mail (kann nicht geändert werden)</label>
-        <input type="email" id="email" value={$session.user?.email || ''} disabled />
+    <form on:submit|preventDefault={handleProfileCreation}>
+        <label for="display_name">Angezeigter Name (darf sich doppeln)</label>
+        <input type="text" id="display_name" bind:value={displayNameInput} required disabled={isLoading} />
 
-        <label for="placeOfStudy">Studienort (automatisch)</label>
-        <input type="text" id="placeOfStudy" bind:value={placeOfStudy} disabled />
+        <label for="username">@Benutzer-ID (muss eindeutig sein)</label>
+        <input type="text" id="username" bind:value={usernameInput} placeholder="Einmalige ID (z.B. elias_h)" required disabled={isLoading} />
 
-        <label for="username">Eindeutige Benutzer-ID*</label>
-        <input type="text" id="username" bind:value={usernameInput} placeholder="z.B. elias_123" required />
-
-        <label for="displayName">Anzeigename*</label>
-        <input type="text" id="displayName" bind:value={displayNameInput} placeholder="Elias Schmolke" required />
-
-        <!-- Das '*' (Pflichtfeld-Sternchen) wurde beim Alter entfernt -->
         <label for="age">Alter</label>
-        <input type="number" id="age" bind:value={ageInput} placeholder="18" />
+        <input type="number" id="age" bind:value={ageInput} required disabled={isLoading} min="16" />
 
-        <label for="location">Wohnort (Optional)</label>
-        <input type="text" id="location" bind:value={locationInput} placeholder="Schwarzenbach a.d. Saale" />
+        <label for="location">Wohnort (optional)</label>
+        <input type="text" id="location" bind:value={locationInput} disabled={isLoading} />
 
-        <button type="submit" on:click={handleCreateProfile} disabled={isLoading}>
-            {#if isLoading}Speichert...{:else}Profil erstellen{/if}
+        <div class="read-only-field">
+            <label>E-Mail:</label>
+            <span>{email}</span>
+        </div>
+
+        <div class="read-only-field">
+            <label>Studienort:</label>
+            <span>{placeOfStudy}</span>
+        </div>
+
+        {#if error}
+            <p class="error">{error}</p>
+        {/if}
+
+        <button type="submit" disabled={isLoading}>
+            {#if isLoading}Erstelle Profil...{:else}Profil erstellen{/if}
         </button>
-
-        {#if error}<p class="error">{error}</p>{/if}
     </form>
 </main>
 
-<!-- Styles (keine Änderung) -->
 <style>
-    main { font-family: sans-serif; max-width: 500px; margin: 2em auto; padding: 1em; }
-    .profile-form { display: grid; gap: 1.2em; }
-    label { text-align: left; font-size: 0.9em; font-weight: 500; }
-    input { padding: 0.8em; font-size: 1em; border: 1px solid #ccc; border-radius: 4px; }
-    input:disabled { background-color: #eee; color: #777; }
-    button { font-size: 1.2em; padding: 0.8em; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; }
+    main { font-family: sans-serif; max-width: 450px; margin: 2em auto; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
+    form { display: grid; gap: 1em; }
+    label { font-weight: bold; margin-top: 10px; }
+    input { padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
+    .read-only-field { margin-top: 10px; padding: 10px; border: 1px solid #eee; border-radius: 4px; background-color: #f9f9f9; text-align: left; }
+    .read-only-field span { font-weight: normal; display: block; margin-top: 5px; color: #555; }
+    button { font-size: 1.2em; padding: 10px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; margin-top: 20px; }
     button:disabled { background-color: #aaa; }
-    .error { color: red; }
+    .error { color: red; text-align: center; }
 </style>
