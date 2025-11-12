@@ -43,12 +43,14 @@
 
                 if (profile) {
                     // Profil existiert: Gehe zum Dashboard (außer wir sind schon da)
-                    if (currentPage !== '/dashboard' && currentPage !== '/') {
+                    // NEU: Wenn wir NICHT auf dem Dashboard sind, gehe zum Dashboard
+                    if (!currentPage.startsWith('/dashboard')) {
                         goto('/dashboard');
                     }
                 } else {
                     // PROFIL FEHLT: Zwinge ihn zur Profilerstellung
-                    if (currentPage !== '/profile-setup' && currentPage !== '/') {
+                    // NEU: Wenn wir NICHT auf der Setup-Seite sind, gehe zur Setup-Seite
+                    if (!currentPage.startsWith('/profile-setup')) {
                         goto('/profile-setup');
                     }
                 }
@@ -57,6 +59,7 @@
                 session.set({ isLoggedIn: false, user: null, profile: null });
                 // Schicke ihn zur Login-Seite
                 const currentPage = $page.url.pathname;
+                // NEU: Wenn wir NICHT auf der Login-Seite oder der Profil-Setup-Seite sind, gehe zum Login
                 if (currentPage !== '/' && currentPage !== '/profile-setup') {
                     goto('/');
                 }
