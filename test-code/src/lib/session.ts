@@ -1,25 +1,19 @@
 import { writable } from 'svelte/store';
-import type { Identity } from '$lib/db';
-
-// Dies ist der "Schreibtisch". Er speichert,
-// wer *gerade jetzt* eingeloggt ist.
+import type { User } from '@supabase/supabase-js';
 
 // Definiere, wie ein "leerer" Zustand aussieht
 interface SessionState {
     isLoggedIn: boolean;
-    identity: Identity | null;
+    user: User | null; // Wir speichern jetzt das Supabase 'User'-Objekt
 }
 
 const initialState: SessionState = {
     isLoggedIn: false,
-    identity: null
+    user: null,
 };
 
-// Erstelle den Store. Er ist "writable" (beschreibbar).
+// Erstelle den Store
 export const session = writable<SessionState>(initialState);
 
-// Eine einfache Logout-Funktion, die den Store
-// auf seinen Anfangszustand zurücksetzt.
-export function logout() {
-    session.set(initialState);
-}
+// Wir brauchen keine eigene logout-Funktion mehr,
+// da Supabase das über "onAuthStateChange" in +page.svelte regelt.

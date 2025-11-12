@@ -1,59 +1,62 @@
 <script lang="ts">
-    import { db } from '$lib/db';
-    import { session, logout } from '$lib/session';
-    import { generateRandomPassword } from '$lib/utils'; // <-- NEU
-    import { hashPassword, bufferToHex } from '$lib/cryptoUtils'; // <-- (Wir müssen hashPassword auch auslagern)
+    import { onMount } from 'svelte';
+    import { session } from '$lib/session';
+    import { supabase } from '$lib/supabaseClient'; // <-- NEU: Importiere Supabase
+    import type { User } from '@supabase/supabase-js';
 
-    // --- Konfiguration ---
-    const allowedDomains = ['hallo.de', 'moin.de', 'gmail.com']; // version 2
+    // --- Konfiguration (Behalten wir bei!) ---
+    const allowedDomains = ['hallo.de', 'moin.de', 'gmail.com'];
     // ---------------------
 
     let emailInput = '';
     let passwordInput = '';
     let currentView: 'login' | 'register' = 'login';
     let error = '';
+    let infoMessage = ''; // Für Erfolgsmeldungen (z.B. "Check deine E-Mail")
 
-    // NEUER STATUS für die Registrierung
-    let registrationStep: 'email' | 'password' = 'email';
-    let tempGeneratedPassword = ''; // <-- Speichert das Passwort, das wir "senden" würden
-
-    // --- Helfer-Funktionen ---
-    // (Ich habe hashPassword und bufferToHex in eine neue Datei
-    // src/lib/cryptoUtils.ts verschoben, um es sauber zu halten.
-    // Du kannst sie auch hier lassen, wenn du willst.)
-
-    // (Bitte erstelle src/lib/cryptoUtils.ts und füge die
-    // bufferToHex und hashPassword Funktionen von letztem Mal dort ein)
+    // === NEU: Beim Laden der Seite auf Session prüfen ===
+    onMount(() => {
+        // Diese Funktion prüft den Login-Status, wenn die Seite lädt
+        // UND immer, wenn er sich ändert (z.B. nach Login/Logout).
+        supabase.auth.onAuthStateChange((_event, sessionData) => {
+            if (sessionData) {
+                // Jemand ist eingeloggt!
+                session.set({ isLoggedIn: true, user: sessionData.user });
+            } else {
+                // Niemand ist eingeloggt.
+                session.set({ isLoggedIn: false, user: null });
+            }
+        });
+    });
 
     function switchView(view: 'login' | 'register') {
         currentView = view;
         error = '';
+        infoMessage = '';
         emailInput = '';
         passwordInput = '';
-        registrationStep = 'email'; // <-- NEU: Registrierung zurücksetzen
     }
 
-    function handleLogout() {
-        logout();
-        emailInput = '';
-        passwordInput = '';
+    // === NEUE LOGOUT-FUNKTION ===
+    async function handleLogout() {
         error = '';
-        currentView = 'login';
-        registrationStep = 'email'; // <-- NEU: Registrierung zurücksetzen
+        infoMessage = '';
+        await supabase.auth.signOut();
+        // onAuthStateChange wird den Rest erledigen.
     }
 
-    // === NEUE "APPLY"-FUNKTION (SCHRITT 1 der Registrierung) ===
-    async function handleApplyForRegistration() {
+    // === NEUE REGISTRIERUNGS-FUNKTION ===
+    async function handleRegister() {
         error = '';
+        infoMessage = '';
 
-        // 1. Domain-Check
+        // 1. Domain-Check (deine Logik!)
         try {
             const parts = emailInput.split('@');
-            if (parts.length !== 2) throw new Error();
+            if (parts.length !== 2) throw new Error('Ungültige E-Mail');
             const domain = parts[1].toLowerCase();
-
             if (!allowedDomains.includes(domain)) {
-                error = 'Diese E-Mail-Domain ist nicht zur Registrierung berechtigt.';
+                error = 'Diese E-Mail-Domain ist nicht berechtigt.';
                 return;
             }
         } catch (e) {
@@ -61,123 +64,43 @@
             return;
         }
 
-        // 2. Prüfen, ob E-Mail bereits existiert
-        const existing = await db.identity.get(emailInput.toLowerCase());
-        if (existing) {
-            error = 'E-Mail bereits registriert. Bitte logge dich ein.';
+        // 2. Passwort-Check
+        if (passwordInput.length < 6) {
+            error = 'Passwort muss mindestens 6 Zeichen lang sein.';
             return;
         }
 
-        // 3. Passwort generieren
-        tempGeneratedPassword = generateRandomPassword();
+        // 3. Supabase Registrierung
+        const { data, error: authError } = await supabase.auth.signUp({
+            email: emailInput,
+            password: passwordInput,
+        });
 
-        // --- HIER KOMMT DER SERVER-TEIL ---
-        // In der ZUKUNFT:
-        // await fetch('/api/send-password', {
-        //   method: 'POST',
-        //   body: JSON.stringify({
-        //     email: emailInput,
-        //     password: tempGeneratedPassword
-        //   })
-        // });
-
-// --- HIER WIRD DIE ECHTE E-MAIL GESENDET ---
-        try {
-            const response = await fetch('/api/send-email', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    email: emailInput,
-                    password: tempGeneratedPassword
-                })
-            });
-
-            if (!response.ok) {
-                // Zeigt dem Benutzer den Server-Fehler an
-                const errData = await response.json();
-                error = errData.message || 'Server-Fehler';
-                return;
-            }
-
+        if (authError) {
+            error = authError.message;
+        } else {
             // ERFOLG!
-            console.log('API-Aufruf erfolgreich, E-Mail wird gesendet.');
-
-            // 4. Zur Passworteingabe wechseln
-            registrationStep = 'password';
-
-        } catch (e) {
-            error = 'Netzwerkfehler. Bitte erneut versuchen.';
-            console.error(e);
-            return;
+            infoMessage = 'Registrierung erfolgreich! Bitte prüfe deine E-Mails, um deinen Account zu bestätigen.';
+            currentView = 'login'; // Wechsle zum Login-Tab
         }
     }
 
-    // === REGISTRIERUNGS-FUNKTION (SCHRITT 2) ===
-    // Diese Funktion wird jetzt vom "Passwort"-Feld aufgerufen
-    async function handleCompleteRegistration() {
-        error = '';
-
-        // 1. Prüfen, ob das eingegebene Passwort mit dem generierten übereinstimmt
-        if (passwordInput !== tempGeneratedPassword) {
-            error = 'Das eingegebene Passwort ist falsch.';
-            return;
-        }
-
-        // 2. Passwort-Check (Mindestlänge)
-        if (passwordInput.length < 8) { // Wir nutzen die Länge aus utils
-            error = 'Passwort ist zu kurz (Sollte nicht passieren).';
-            return;
-        }
-
-        try {
-            // 3. Passwort hashen (Das "echte" Passwort)
-            const passwordHash = await hashPassword(passwordInput);
-
-            // 4. Schlüssel generieren
-            const keyPair = await crypto.subtle.generateKey(
-                { name: 'ECDSA', namedCurve: 'P-384' }, true, ['sign', 'verify']
-            );
-
-            const newIdentity = {
-                email: emailInput.toLowerCase(),
-                privateKey: keyPair.privateKey,
-                publicKey: keyPair.publicKey,
-                passwordHash: passwordHash
-            };
-
-            // 5. In DB speichern
-            await db.identity.add(newIdentity);
-
-            // 6. Session setzen
-            session.set({ isLoggedIn: true, identity: newIdentity });
-
-            // 7. Aufräumen
-            tempGeneratedPassword = '';
-            passwordInput = '';
-            registrationStep = 'email';
-
-        } catch (err) {
-            error = 'Konto konnte nicht erstellt werden (evtl. Race-Condition).';
-            console.error(err);
-        }
-    }
-
-    // === LOGIN-FUNKTION (BLEIBT GLEICH) ===
+    // === NEUE LOGIN-FUNKTION ===
     async function handleLogin() {
         error = '';
+        infoMessage = '';
+
         try {
-            const foundIdentity = await db.identity.get(emailInput.toLowerCase());
-            if (foundIdentity) {
-                const inputHash = await hashPassword(passwordInput);
-                if (inputHash === foundIdentity.passwordHash) {
-                    session.set({ isLoggedIn: true, identity: foundIdentity });
-                } else {
-                    error = 'Falsche E-Mail oder falsches Passwort.';
-                }
+            const { data, error: authError } = await supabase.auth.signInWithPassword({
+                email: emailInput,
+                password: passwordInput,
+            });
+
+            if (authError) {
+                error = authError.message;
             } else {
-                error = 'Falsche E-Mail oder falsches Passwort.';
+                // Erfolg! onAuthStateChange wird den Login-Status automatisch aktualisieren.
+                // Wir müssen hier nichts weiter tun.
             }
         } catch (err) {
             error = 'Ein Fehler ist aufgetreten.';
@@ -189,9 +112,11 @@
 <main>
     <h1>Willkommen zu deiner P2P-App</h1>
 
+    <!-- $session.isLoggedIn kommt jetzt von onAuthStateChange -->
     {#if $session.isLoggedIn}
 
-        <h2>Eingeloggt als: {$session.identity?.email}</h2>
+        <h2>Eingeloggt als: {$session.user?.email}</h2>
+        <p>Account auf dem Server verifiziert.</p>
         <button on:click={handleLogout}>Ausloggen</button>
 
     {:else}
@@ -206,48 +131,37 @@
                 </button>
             </nav>
 
-            {#if currentView === 'login'}
+            <!-- Wir brauchen jetzt E-Mail UND Passwort für die Registrierung -->
+            <form on:submit|preventDefault>
+                <label for="email">E-Mail</label>
+                <input
+                        type="email"
+                        id="email"
+                        bind:value={emailInput}
+                        placeholder="deine.email@hallo.de"
+                />
 
-                <form on:submit|preventDefault>
-                    <label for="email">E-Mail</label>
-                    <input type="email" id="email" bind:value={emailInput} />
+                <label for="password">Passwort</label>
+                <input
+                        type="password"
+                        id="password"
+                        bind:value={passwordInput}
+                        placeholder="Wähle ein sicheres Passwort..."
+                />
 
-                    <label for="password">Passwort</label>
-                    <input type="password" id="password" bind:value={passwordInput} />
-
+                {#if currentView === 'login'}
                     <button type="submit" on:click={handleLogin}>Einloggen</button>
-                    {#if error}<p class="error">{error}</p>{/if}
-                </form>
+                {:else}
+                    <button type="submit" on:click={handleRegister}>Registrieren</button>
+                {/if}
 
-            {:else}
-
-                <form on:submit|preventDefault>
-                    <label for="email">E-Mail</label>
-                    <input
-                            type="email"
-                            id="email"
-                            bind:value={emailInput}
-                            placeholder="deine.email@hallo.de"
-                            disabled={registrationStep === 'password'}
-                    />
-
-                    {#if registrationStep === 'email'}
-                        <button type="submit" on:click={handleApplyForRegistration}>Bewerben</button>
-                    {:else}
-                        <label for="password">Passwort (aus E-Mail)</label>
-                        <input
-                                type="password"
-                                id="password"
-                                bind:value={passwordInput}
-                                placeholder="Passwort aus deiner E-Mail..."
-                        />
-                        <button type="submit" on:click={handleCompleteRegistration}>Registrieren</button>
-                    {/if}
-
-                    {#if error}<p class="error">{error}</p>{/if}
-                </form>
-
-            {/if}
+                {#if error}
+                    <p class="error">{error}</p>
+                {/if}
+                {#if infoMessage}
+                    <p class="info">{infoMessage}</p>
+                {/if}
+            </form>
         </div>
     {/if}
 </main>
@@ -296,9 +210,6 @@
         border: 1px solid #ccc;
         border-radius: 4px;
     }
-    input:disabled {
-        background-color: #eee;
-    }
     button[type="submit"] {
         font-size: 1.2em;
         padding: 0.5em 1em;
@@ -311,5 +222,8 @@
     }
     .error {
         color: red;
+    }
+    .info {
+        color: green;
     }
 </style>
