@@ -1,19 +1,25 @@
 import { writable } from 'svelte/store';
 import type { User } from '@supabase/supabase-js';
 
-// Definiere, wie ein "leerer" Zustand aussieht
+// Wir definieren, wie unser 'profiles'-Objekt aussieht
+export interface Profile {
+    username: string;
+    display_name: string;
+    location?: string;
+    age: number;
+    place_of_study: string;
+}
+
 interface SessionState {
     isLoggedIn: boolean;
-    user: User | null; // Wir speichern jetzt das Supabase 'User'-Objekt
+    user: User | null;
+    profile: Profile | null; // <-- HIER speichern wir die Profil-Daten
 }
 
 const initialState: SessionState = {
     isLoggedIn: false,
     user: null,
+    profile: null,
 };
 
-// Erstelle den Store
 export const session = writable<SessionState>(initialState);
-
-// Wir brauchen keine eigene logout-Funktion mehr,
-// da Supabase das über "onAuthStateChange" in +page.svelte regelt.
