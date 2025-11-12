@@ -75,7 +75,8 @@
         error = '';
         infoMessage = '';
 
-        // Supabase will handle the login and the session listener in +layout.svelte will handle routing
+        // Supabase führt den Login durch. Der Layout-Code im Hintergrund
+        // hört dann auf die erfolgreiche Session und leitet weiter.
         const { error: authError } = await supabase.auth.signInWithPassword({
             email: emailInput,
             password: passwordInput,
@@ -83,8 +84,24 @@
 
         if (authError) {
             error = 'Falsche E-Mail oder falsches Passwort.';
+            console.error('Login Fehler:', authError);
+        } else {
+            // Login erfolgreich: Wir müssen nichts tun, da das Layout den Session-Wechsel
+            // erkennt und die Weiterleitung zu /profile-setup (oder /dashboard) übernimmt.
+            infoMessage = 'Erfolgreich eingeloggt. Leite weiter...';
         }
+
+        // WICHTIG: isLoading muss am Ende zurückgesetzt werden.
         isLoading = false;
+    }
+
+    // NEUE FUNKTION: Vereinheitlichte Behandlung des Formular-Submits
+    async function handleSubmit() {
+        if (currentView === 'login') {
+            await handleLogin();
+        } else {
+            await handleRegister();
+        }
     }
 </script>
 
@@ -100,7 +117,8 @@
             </button>
         </nav>
 
-        <form on:submit|preventDefault>
+        <!-- HIER DIE ÄNDERUNG: handleSubmit wird direkt am Formular gebunden -->
+        <form on:submit|preventDefault={handleSubmit}>
             <label for="email">E-Mail</label>
             <input type="email" id="email" bind:value={emailInput} placeholder="deine.email@hallo.de" disabled={isLoading} />
 
@@ -108,11 +126,13 @@
             <input type="password" id="password" bind:value={passwordInput} placeholder="Wähle ein sicheres Passwort..." disabled={isLoading} />
 
             {#if currentView === 'login'}
-                <button type="submit" on:click={handleLogin} disabled={isLoading}>
+                <!-- on:click entfernt, type="submit" reicht -->
+                <button type="submit" disabled={isLoading}>
                     {#if isLoading}Lädt...{:else}Einloggen{/if}
                 </button>
             {:else}
-                <button type="submit" on:click={handleRegister} disabled={isLoading}>
+                <!-- on:click entfernt, type="submit" reicht -->
+                <button type="submit" disabled={isLoading}>
                     {#if isLoading}Registriere...{:else}Registrieren{/if}
                 </button>
             {/if}
