@@ -1,15 +1,9 @@
 // src/lib/session.ts
 import { writable } from 'svelte/store';
 import type { User } from '@supabase/supabase-js';
+import { supabase } from './supabaseClient'; // WICHTIG: Korrekter Import
 
-// Wir definieren, wie unser 'profiles'-Objekt aussieht
-export interface Profile {
-    username: string;
-    display_name: string;
-    location?: string;
-    age: number | null; // Erlaubt Null
-    place_of_study: string;
-}
+// ... (Ihre Profile Interface bleibt gleich)
 
 interface SessionState {
     isLoggedIn: boolean;
@@ -25,11 +19,8 @@ const initialState: SessionState = {
 
 export const session = writable<SessionState>(initialState);
 
-// Muss hier neu definiert werden, da wir die alte db.ts gelöscht haben
-export function logout() {
-    supabase.auth.signOut();
+// KORRIGIERTE LOGOUT-FUNKTION
+export async function logout() {
+    await supabase.auth.signOut(); // <-- DIESE ZEILE HAT GEFEHLT!
     session.set(initialState);
 }
-// Wir müssen den supabase client im session store verfügbar machen
-// Das ist ein kleiner Trick, da Svelte Stores sonst keinen Zugriff auf den Client haben
-import { supabase } from './supabaseClient';
