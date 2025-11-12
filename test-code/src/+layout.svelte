@@ -1,4 +1,3 @@
-// src/+layout.svelte
 <script lang="ts">
     import { session } from '$lib/session';
     import { supabase } from '$lib/supabaseClient';
@@ -8,26 +7,34 @@
 
     let sessionLoaded = false;
 
+    // WICHTIG: Wir rufen die Logik sofort nach dem Initialisieren auf
     onMount(() => {
-        // Initialer Check, falls der Benutzer den Browser geschlossen hat
+        // 1. Initialer Check, falls der Benutzer bereits eingeloggt ist (z.B. nach Browser-Neustart)
+        // Wir rufen handleAuthChange einmal auf, um den Zustand zu synchronisieren.
         supabase.auth.getSession().then(({ data: { session: sessionData } }) => {
             handleAuthChange(null, sessionData);
+            sessionLoaded = true; // Setze Loaded hier, da onMount nur einmal läuft
         });
 
+        // 2. Auth Listener für Echtzeit-Änderungen (Login/Logout)
         const { data: authListener } = supabase.auth.onAuthStateChange(
             async (_event, sessionData) => {
                 handleAuthChange(_event, sessionData);
             }
         );
 
+        // Die Hauptlogik, die die Weiterleitung steuert
         async function handleAuthChange(_event: any, sessionData: any) {
+            // Wenn das Token in der URL vorhanden ist (nach E-Mail-Klick), verarbeitet Supabase es automatisch.
+            // Wir müssen nur prüfen, ob eine gültige Session existiert.
+
             if (sessionData) {
                 // BENUTZER IST EINGELOGGT
 
                 // 1. Versuche, das Profil zu laden
                 const { data: profile } = await supabase
                     .from('profiles')
-                    .select('*') // Selektiere alle Spalten
+                    .select('*')
                     .eq('id', sessionData.user.id)
                     .single();
 
@@ -35,36 +42,35 @@
                 session.set({
                     isLoggedIn: true,
                     user: sessionData.user,
-                    profile: profile, // ist entweder 'null' oder das Profil
+                    profile: profile,
                 });
 
                 // 3. Routing-Logik
                 const currentPage = $page.url.pathname;
 
                 if (profile) {
-                    // Profil existiert: Gehe zum Dashboard (außer wir sind schon da)
-                    // NEU: Wenn wir NICHT auf dem Dashboard sind, gehe zum Dashboard
-                    if (!currentPage.startsWith('/dashboard')) {
+                    // PROFIL EXISTIERT: Gehe zum Dashboard
+                    if (currentPage !== '/dashboard') {
                         goto('/dashboard');
                     }
                 } else {
                     // PROFIL FEHLT: Zwinge ihn zur Profilerstellung
-                    // NEU: Wenn wir NICHT auf der Setup-Seite sind, gehe zur Setup-Seite
-                    if (!currentPage.startsWith('/profile-setup')) {
+                    if (currentPage !== '/profile-setup') {
                         goto('/profile-setup');
                     }
                 }
             } else {
                 // BENUTZER IST AUSGELOGGT ODER FEHLGESCHLAGEN
                 session.set({ isLoggedIn: false, user: null, profile: null });
-                // Schicke ihn zur Login-Seite
+
+                // Schicke ihn zur Login-Seite (wenn er nicht schon dort ist oder gerade einen Token verarbeitet)
                 const currentPage = $page.url.pathname;
-                // NEU: Wenn wir NICHT auf der Login-Seite oder der Profil-Setup-Seite sind, gehe zum Login
-                if (currentPage !== '/' && currentPage !== '/profile-setup') {
+                if (currentPage !== '/') {
                     goto('/');
                 }
             }
-            sessionLoaded = true;
+            // Wir müssen sessionLoaded hier NICHT auf false setzen, sonst würde es
+            // immer kurz den Ladebildschirm zeigen, wenn der Benutzer eingeloggt ist.
         }
 
         return () => {
@@ -74,7 +80,7 @@
 </script>
 
 {#if !sessionLoaded || navigating}
-    <!-- Schöner Ladebildschirm, während wir die Session prüfen -->
+    <!-- Zeigt Ladebildschirm nur beim Start und während der Navigation -->
     <div class="loading-screen">
         <h1>Lädt...</h1>
     </div>
