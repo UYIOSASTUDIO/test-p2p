@@ -81,12 +81,37 @@
         //   })
         // });
 
-        // FÜR UNSEREN TEST (Wir tun nur so, als ob wir senden):
-        console.log(`(TEST) Sende Passwort an ${emailInput}: ${tempGeneratedPassword}`);
-        alert(`(TEST) Dein Passwort (aus der Konsole) ist: ${tempGeneratedPassword}`);
+// --- HIER WIRD DIE ECHTE E-MAIL GESENDET ---
+        try {
+            const response = await fetch('/api/send-email', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    email: emailInput,
+                    password: tempGeneratedPassword
+                })
+            });
 
-        // 4. Zur Passworteingabe wechseln
-        registrationStep = 'password';
+            if (!response.ok) {
+                // Zeigt dem Benutzer den Server-Fehler an
+                const errData = await response.json();
+                error = errData.message || 'Server-Fehler';
+                return;
+            }
+
+            // ERFOLG!
+            console.log('API-Aufruf erfolgreich, E-Mail wird gesendet.');
+
+            // 4. Zur Passworteingabe wechseln
+            registrationStep = 'password';
+
+        } catch (e) {
+            error = 'Netzwerkfehler. Bitte erneut versuchen.';
+            console.error(e);
+            return;
+        }
     }
 
     // === REGISTRIERUNGS-FUNKTION (SCHRITT 2) ===
