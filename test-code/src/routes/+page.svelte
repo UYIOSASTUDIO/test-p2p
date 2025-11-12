@@ -1,10 +1,10 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { session } from '$lib/session';
-    import { supabase } from '$lib/supabaseClient'; // <-- NEU: Importiere Supabase
+    import { supabase } from '$lib/supabaseClient';
     import type { User } from '@supabase/supabase-js';
 
-    // --- Konfiguration (Behalten wir bei!) ---
+    // --- Konfiguration ---
     const allowedDomains = ['hallo.de', 'moin.de', 'gmail.com'];
     // ---------------------
 
@@ -12,23 +12,20 @@
     let passwordInput = '';
     let currentView: 'login' | 'register' = 'login';
     let error = '';
-    let infoMessage = ''; // Für Erfolgsmeldungen (z.B. "Check deine E-Mail")
+    let infoMessage = '';
 
-    // === NEU: Beim Laden der Seite auf Session prüfen ===
+    // === onMount (bleibt gleich) ===
     onMount(() => {
-        // Diese Funktion prüft den Login-Status, wenn die Seite lädt
-        // UND immer, wenn er sich ändert (z.B. nach Login/Logout).
         supabase.auth.onAuthStateChange((_event, sessionData) => {
             if (sessionData) {
-                // Jemand ist eingeloggt!
                 session.set({ isLoggedIn: true, user: sessionData.user });
             } else {
-                // Niemand ist eingeloggt.
                 session.set({ isLoggedIn: false, user: null });
             }
         });
     });
 
+    // === switchView (bleibt gleich) ===
     function switchView(view: 'login' | 'register') {
         currentView = view;
         error = '';
@@ -37,20 +34,19 @@
         passwordInput = '';
     }
 
-    // === NEUE LOGOUT-FUNKTION ===
+    // === handleLogout (bleibt gleich) ===
     async function handleLogout() {
         error = '';
         infoMessage = '';
         await supabase.auth.signOut();
-        // onAuthStateChange wird den Rest erledigen.
     }
 
-    // === NEUE REGISTRIERUNGS-FUNKTION ===
+    // === HIER IST DIE VERBESSERTE REGISTRIERUNGS-FUNKTION ===
     async function handleRegister() {
         error = '';
         infoMessage = '';
 
-        // 1. Domain-Check (deine Logik!)
+        // 1. Domain-Check (bleibt gleich)
         try {
             const parts = emailInput.split('@');
             if (parts.length !== 2) throw new Error('Ungültige E-Mail');
@@ -64,28 +60,39 @@
             return;
         }
 
-        // 2. Passwort-Check
+        // 2. Passwort-Check (bleibt gleich)
         if (passwordInput.length < 6) {
             error = 'Passwort muss mindestens 6 Zeichen lang sein.';
             return;
         }
 
-        // 3. Supabase Registrierung
+        // 3. Supabase Registrierung (mit NEUER Logik)
         const { data, error: authError } = await supabase.auth.signUp({
             email: emailInput,
             password: passwordInput,
         });
 
         if (authError) {
+            // FALL 1: Ein echter Fehler ist aufgetreten
+            // (z.B. "Password should be at least 6 characters")
             error = authError.message;
+
+        } else if (data.user?.identities?.length === 0) {
+            // FALL 2: KEIN Fehler, aber 'identities' ist ein leeres Array [].
+            // Das ist die "Anti-Enumeration"-Antwort von Supabase.
+            // Es bedeutet: "Dieser Benutzer existiert bereits und ist bestätigt."
+            // Genau der Fall, den Sie beobachtet haben!
+            error = 'Diese E-Mail-Adresse wurde schon benutzt. Bitte logge dich ein.';
+
         } else {
-            // ERFOLG!
+            // FALL 3: ERFOLG! Ein NEUER User wurde erstellt.
+            // (data.user.identities ist NICHT leer)
             infoMessage = 'Registrierung erfolgreich! Bitte prüfe deine E-Mails, um deinen Account zu bestätigen.';
             currentView = 'login'; // Wechsle zum Login-Tab
         }
     }
 
-    // === NEUE LOGIN-FUNKTION ===
+    // === handleLogin (bleibt gleich) ===
     async function handleLogin() {
         error = '';
         infoMessage = '';
@@ -97,11 +104,11 @@
             });
 
             if (authError) {
-                error = authError.message;
-            } else {
-                // Erfolg! onAuthStateChange wird den Login-Status automatisch aktualisieren.
-                // Wir müssen hier nichts weiter tun.
+                // Hier gibt Supabase einen klaren Fehler aus, das ist sicher
+                error = 'Falsche E-Mail oder falsches Passwort.';
             }
+            // Erfolg wird automatisch von onAuthStateChange behandelt
+
         } catch (err) {
             error = 'Ein Fehler ist aufgetreten.';
             console.error(err);
@@ -109,18 +116,15 @@
     }
 </script>
 
+<!-- DEIN HTML- UND STYLE-TEIL BLEIBT EXAKT GLEICH -->
 <main>
     <h1>Willkommen zu deiner P2P-App</h1>
 
-    <!-- $session.isLoggedIn kommt jetzt von onAuthStateChange -->
     {#if $session.isLoggedIn}
-
         <h2>Eingeloggt als: {$session.user?.email}</h2>
         <p>Account auf dem Server verifiziert.</p>
         <button on:click={handleLogout}>Ausloggen</button>
-
     {:else}
-
         <div class="auth-container">
             <nav>
                 <button on:click={() => switchView('login')} class:active={currentView === 'login'}>
@@ -131,7 +135,6 @@
                 </button>
             </nav>
 
-            <!-- Wir brauchen jetzt E-Mail UND Passwort für die Registrierung -->
             <form on:submit|preventDefault>
                 <label for="email">E-Mail</label>
                 <input
