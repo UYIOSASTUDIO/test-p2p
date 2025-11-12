@@ -1,127 +1,151 @@
-// src/routes/profile-setup/+page.svelte
 <script lang="ts">
-    import { session } from '$lib/session';
     import { supabase } from '$lib/supabaseClient';
-    import { goto } from '$app/navigation';
 
-    // States aus dem Session Store
-    let user = $session.user;
-    let email = user?.email || '';
+    // --- Configuration (Domain Check) ---
+    const allowedDomains = ['hallo.de', 'moin.de', 'gmail.com'];
+    // ------------------------------------
 
-    // Formular-Zustände
-    let usernameInput = '';
-    let displayNameInput = '';
-    let ageInput: number | null = null; // Als Zahl oder null speichern
-    let locationInput = '';
-    let isLoading = false;
+    let emailInput = '';
+    let passwordInput = '';
+    let currentView: 'login' | 'register' = 'login';
     let error = '';
+    let infoMessage = '';
+    let isLoading = false; // Loading status for buttons
 
-    // Funktion zur Ableitung des Studienortes
-    function determinePlaceOfStudy(email: string): string {
-        const domain = email.split('@')[1];
-        switch (domain) {
-            case 'hof-university.de':
-                return 'Hof University';
-            case 'moin.de': // Beispiel
-                return 'Hamburg University of Technology';
-            default:
-                return 'Unknown';
-        }
+    function switchView(view: 'login' | 'register') {
+        currentView = view;
+        error = '';
+        infoMessage = '';
+        emailInput = '';
+        passwordInput = '';
     }
 
-    const placeOfStudy = determinePlaceOfStudy(email);
-
-    async function handleProfileCreation() {
+    async function handleRegister() {
         isLoading = true;
         error = '';
+        infoMessage = '';
 
-        // 1. Validierung
-        if (usernameInput.length < 3 || displayNameInput.length < 3 || ageInput === null || ageInput <= 16) {
-            error = 'Bitte fülle alle Pflichtfelder (außer Wohnort) korrekt aus. Alter muss > 16 sein.';
+        try {
+            // 1. Domain Check
+            const parts = emailInput.split('@');
+            if (parts.length !== 2) throw new Error('Invalid email');
+            const domain = parts[1].toLowerCase();
+            if (!allowedDomains.includes(domain)) {
+                error = 'Diese E-Mail-Domain ist nicht berechtigt.';
+                isLoading = false;
+                return;
+            }
+        } catch (e) {
+            error = 'Ungültige E-Mail-Adresse.';
             isLoading = false;
             return;
         }
 
-        // 2. Daten vorbereiten
-        const newProfile = {
-            id: user?.id, // Supabase ID vom eingeloggten Benutzer
-            username: usernameInput.toLowerCase(), // Eindeutige ID (muss Kleinbuchstaben sein)
-            display_name: displayNameInput,
-            age: ageInput,
-            location: locationInput || null, // Speichere null, wenn leer
-            place_of_study: placeOfStudy,
-        };
-
-        // 3. In Supabase speichern
-        // Wir nutzen 'insert' (da es das erste Mal ist)
-        const { error: dbError } = await supabase
-            .from('profiles')
-            .insert([newProfile]);
-
-        isLoading = false;
-
-        if (dbError) {
-            if (dbError.code === '23505') { // Code für Unique Constraint Violation
-                error = 'Benutzer-ID (@' + usernameInput + ') ist bereits vergeben. Bitte wähle eine andere.';
-            } else {
-                error = 'Fehler beim Speichern des Profils. Bitte versuche es erneut.';
-                console.error('DB Error:', dbError);
-            }
+        // 2. Password Check
+        if (passwordInput.length < 6) {
+            error = 'Passwort muss mindestens 6 Zeichen lang sein.';
+            isLoading = false;
             return;
         }
 
-        // 4. Erfolg: Session aktualisieren und weiterleiten
-        // Wir müssen die Session nicht manuell aktualisieren, da das Layout
-        // den neuen Zustand beim nächsten Laden selbst erkennt.
-        await goto('/dashboard');
+        // 3. Supabase Registration
+        const { data, error: authError } = await supabase.auth.signUp({
+            email: emailInput,
+            password: passwordInput,
+        });
+
+        if (authError) {
+            if (authError.message.includes('User already registered')) {
+                error = 'Diese E-Mail-Adresse wurde schon benutzt. Bitte logge dich ein.';
+            } else {
+                error = authError.message;
+            }
+        } else if (data.user?.identities?.length === 0) {
+            // Anti-Enumeration check: User exists and is confirmed
+            error = 'Diese E-Mail-Adresse wurde schon benutzt. Bitte logge dich ein.';
+        } else {
+            infoMessage = 'Registrierung erfolgreich! Bitte prüfe deine E-Mails, um deinen Account zu bestätigen.';
+            currentView = 'login';
+        }
+        isLoading = false;
+    }
+
+    // === KORRIGIERTE LOGIN-FUNKTION ===
+    async function handleLogin() {
+        isLoading = true;
+        error = '';
+        infoMessage = '';
+
+        // Supabase führt den Login durch. Der Layout-Code im Hintergrund
+        // hört dann auf die erfolgreiche Session und leitet weiter.
+        const { error: authError } = await supabase.auth.signInWithPassword({
+            email: emailInput,
+            password: passwordInput,
+        });
+
+        if (authError) {
+            error = 'Falsche E-Mail oder falsches Passwort.';
+            console.error('Login Fehler:', authError);
+            // Falsche Credentials => Supabase speichert kein Token,
+            // Session bleibt ungültig, es wird nicht weitergeleitet.
+        } else {
+            // Login erfolgreich: Wir müssen nichts tun, da das Layout den Session-Wechsel
+            // erkennt und die Weiterleitung zu /profile-setup (oder /dashboard) übernimmt.
+            // Der Lade-Status wird sofort im Layout erfasst und die Seite wechselt.
+            infoMessage = 'Erfolgreich eingeloggt. Leite weiter...';
+        }
+
+        // WICHTIG: isLoading muss am Ende zurückgesetzt werden.
+        isLoading = false;
     }
 </script>
 
 <main>
-    <h1>Dein P2P-Profil erstellen</h1>
-    <p>Dies sind deine öffentlichen Daten, die andere Benutzer sehen werden.</p>
+    <h1>Willkommen zu deiner P2P-App</h1>
+    <div class="auth-container">
+        <nav>
+            <button on:click={() => switchView('login')} class:active={currentView === 'login'}>
+                Login
+            </button>
+            <button on:click={() => switchView('register')} class:active={currentView === 'register'}>
+                Registrieren
+            </button>
+        </nav>
 
-    <form on:submit|preventDefault={handleProfileCreation}>
-        <label for="display_name">Angezeigter Name (darf sich doppeln)</label>
-        <input type="text" id="display_name" bind:value={displayNameInput} required disabled={isLoading} />
+        <form on:submit|preventDefault>
+            <label for="email">E-Mail</label>
+            <input type="email" id="email" bind:value={emailInput} placeholder="deine.email@hallo.de" disabled={isLoading} />
 
-        <label for="username">@Benutzer-ID (muss eindeutig sein)</label>
-        <input type="text" id="username" bind:value={usernameInput} placeholder="Einmalige ID (z.B. elias_h)" required disabled={isLoading} />
+            <label for="password">Passwort</label>
+            <input type="password" id="password" bind:value={passwordInput} placeholder="Wähle ein sicheres Passwort..." disabled={isLoading} />
 
-        <label for="age">Alter</label>
-        <input type="number" id="age" bind:value={ageInput} required disabled={isLoading} min="16" />
+            {#if currentView === 'login'}
+                <button type="submit" on:click={handleLogin} disabled={isLoading}>
+                    {#if isLoading}Lädt...{:else}Einloggen{/if}
+                </button>
+            {:else}
+                <button type="submit" on:click={handleRegister} disabled={isLoading}>
+                    {#if isLoading}Registriere...{:else}Registrieren{/if}
+                </button>
+            {/if}
 
-        <label for="location">Wohnort (optional)</label>
-        <input type="text" id="location" bind:value={locationInput} disabled={isLoading} />
-
-        <div class="read-only-field">
-            <label>E-Mail:</label>
-            <span>{email}</span>
-        </div>
-
-        <div class="read-only-field">
-            <label>Studienort:</label>
-            <span>{placeOfStudy}</span>
-        </div>
-
-        {#if error}
-            <p class="error">{error}</p>
-        {/if}
-
-        <button type="submit" disabled={isLoading}>
-            {#if isLoading}Erstelle Profil...{:else}Profil erstellen{/if}
-        </button>
-    </form>
+            {#if error}<p class="error">{error}</p>{/if}
+            {#if infoMessage}<p class="info">{infoMessage}</p>{/if}
+        </form>
+    </div>
 </main>
 
 <style>
-    main { font-family: sans-serif; max-width: 450px; margin: 2em auto; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
-    form { display: grid; gap: 1em; }
-    label { font-weight: bold; margin-top: 10px; }
-    input { padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
-    .read-only-field { margin-top: 10px; padding: 10px; border: 1px solid #eee; border-radius: 4px; background-color: #f9f9f9; text-align: left; }
-    .read-only-field span { font-weight: normal; display: block; margin-top: 5px; color: #555; }
-    button { font-size: 1.2em; padding: 10px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; margin-top: 20px; }
+    main { font-family: sans-serif; max-width: 400px; margin: 2em auto; text-align: center; }
+    .auth-container { border: 1px solid #ccc; border-radius: 8px; overflow: hidden; }
+    nav { display: flex; }
+    nav button { flex: 1; padding: 1em; font-size: 1em; background-color: #eee; border: none; cursor: pointer; border-bottom: 1px solid #ccc; }
+    nav button.active { background-color: #fff; border-bottom-color: transparent; }
+    form { padding: 2em; display: grid; gap: 1em; }
+    form label { text-align: left; margin-bottom: -0.5em; font-size: 0.9em; }
+    input { padding: 0.8em; font-size: 1em; border: 1px solid #ccc; border-radius: 4px; }
+    button[type="submit"] { font-size: 1.2em; padding: 0.5em 1em; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; margin-top: 1em; }
     button:disabled { background-color: #aaa; }
-    .error { color: red; text-align: center; }
+    .error { color: red; }
+    .info { color: green; }
 </style>
